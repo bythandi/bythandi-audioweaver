@@ -231,9 +231,14 @@ def text_to_speech(
 # Logo (hosted on GitHub)
 LOGO_URL = "https://raw.githubusercontent.com/bythandi/bythandi-audioweaver/main/bythandi%20logo.svg"
 
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    st.image(LOGO_URL, width=150)
+st.markdown(
+    f'''
+    <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+        <img src="{LOGO_URL}" width="150">
+    </div>
+    ''',
+    unsafe_allow_html=True
+)
 
 # Header
 st.markdown('<div class="bythandi-header">AudioWeaver</div>', unsafe_allow_html=True)
