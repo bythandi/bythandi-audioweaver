@@ -162,23 +162,37 @@ def extract_pdf_text(file_content: bytes) -> tuple[str, int]:
 
 # ========== TRANSLATION ==========
 
-def translate_text(text: str, source_lang: str, target_lang: str) -> str:
+def translate_text(text: str, source_lang: str, target_lang: str, progress_callback=None) -> str:
     """Translate text from source language to target language."""
     if source_lang == target_lang:
         return text
     
+    if not text or len(text.strip()) == 0:
+        raise ValueError("No text to translate")
+    
     # deep-translator has a 5000 char limit per request, so chunk it
     max_chunk = 4500
     chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
+    total_chunks = len(chunks)
     
     translated_chunks = []
-    translator = GoogleTranslator(source=source_lang, target=target_lang)
     
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks, 1):
+        if progress_callback:
+            progress_callback(0.1 + (0.2 * i / total_chunks), f"Translating chunk {i}/{total_chunks}...")
+        
+        translator = GoogleTranslator(source=source_lang, target=target_lang)
         translated = translator.translate(chunk)
-        translated_chunks.append(translated)
+        
+        if translated:
+            translated_chunks.append(translated)
     
-    return " ".join(translated_chunks)
+    result = " ".join(translated_chunks)
+    
+    if not result or len(result.strip()) == 0:
+        raise ValueError("Translation returned empty result")
+    
+    return result
 
 
 # ========== TEXT TO SPEECH ==========
@@ -189,8 +203,12 @@ def text_to_speech(
     slow: bool = False,
     output_format: str = "mp3",
     progress_callback=None,
+    progress_offset: float = 0.3,
 ) -> bytes:
     """Convert text to speech using gTTS. Returns audio bytes."""
+    
+    if not text or len(text.strip()) == 0:
+        raise ValueError("No text to convert to speech")
     
     # Split text into chunks (gTTS has limits)
     max_chunk = 5000
@@ -204,7 +222,8 @@ def text_to_speech(
         # Generate audio for each chunk
         for i, chunk in enumerate(chunks, 1):
             if progress_callback:
-                progress_callback(i / (total_chunks + 1), f"Generating audio {i}/{total_chunks}...")
+                progress = progress_offset + (0.5 * i / total_chunks)
+                progress_callback(progress, f"Generating audio {i}/{total_chunks}...")
             
             # Generate speech
             tts = gTTS(text=chunk, lang=language, slow=slow)
@@ -214,9 +233,16 @@ def text_to_speech(
             tts.save(chunk_path)
             chunk_files.append(chunk_path)
         
+        # Verify files were created
+        for chunk_path in chunk_files:
+            if not os.path.exists(chunk_path):
+                raise ValueError(f"Audio chunk was not created: {chunk_path}")
+            if os.path.getsize(chunk_path) == 0:
+                raise ValueError(f"Audio chunk is empty: {chunk_path}")
+        
         # Combine chunks
         if progress_callback:
-            progress_callback(0.9, "Combining audio...")
+            progress_callback(0.85, "Combining audio...")
         
         if len(chunk_files) == 1:
             # Single chunk - just read it
@@ -232,10 +258,13 @@ def text_to_speech(
                     f.write(f"file '{chunk_path}'\n")
             
             # Concatenate using ffmpeg
-            subprocess.run([
+            result = subprocess.run([
                 "ffmpeg", "-y", "-f", "concat", "-safe", "0",
                 "-i", list_file, "-c", "copy", combined_mp3
-            ], capture_output=True, check=True)
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                raise ValueError(f"FFmpeg concat failed: {result.stderr}")
         
         # Convert format if needed
         if output_format == "wav":
@@ -243,15 +272,27 @@ def text_to_speech(
                 progress_callback(0.95, "Converting to WAV...")
             
             output_path = os.path.join(temp_dir, "output.wav")
-            subprocess.run([
+            result = subprocess.run([
                 "ffmpeg", "-y", "-i", combined_mp3, output_path
-            ], capture_output=True, check=True)
+            ], capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                raise ValueError(f"FFmpeg convert failed: {result.stderr}")
         else:
             output_path = combined_mp3
+        
+        # Verify final output
+        if not os.path.exists(output_path):
+            raise ValueError("Final audio file was not created")
+        if os.path.getsize(output_path) == 0:
+            raise ValueError("Final audio file is empty")
         
         # Read final audio bytes
         with open(output_path, "rb") as f:
             audio_bytes = f.read()
+        
+        if len(audio_bytes) == 0:
+            raise ValueError("Audio bytes are empty")
         
         if progress_callback:
             progress_callback(1.0, "Complete!")
@@ -367,31 +408,39 @@ if st.button("🎧 Generate Audio", use_container_width=True):
         status_text = st.empty()
         
         def update_progress(value, message):
-            progress_bar.progress(value)
+            progress_bar.progress(min(value, 1.0))
             status_text.text(message)
         
         try:
             # Translation step (if needed)
             if source_lang != target_lang:
-                update_progress(0.1, f"Translating to {LANGUAGES[target_lang]}...")
-                text_to_speak = translate_text(text_content, source_lang, target_lang)
-                update_progress(0.3, "Translation complete!")
+                update_progress(0.05, f"Translating to {LANGUAGES[target_lang]}...")
+                text_to_speak = translate_text(text_content, source_lang, target_lang, update_progress)
             else:
                 text_to_speak = text_content
+                update_progress(0.3, "Preparing audio generation...")
+            
+            # Verify we have text to speak
+            if not text_to_speak or len(text_to_speak.strip()) < 10:
+                raise ValueError("Not enough text to generate audio after processing")
             
             # Generate audio
-            with st.spinner("Generating audio..."):
-                audio_bytes = text_to_speech(
-                    text=text_to_speak,
-                    language=target_lang,
-                    slow=(speed == "Slow"),
-                    output_format=output_format,
-                    progress_callback=update_progress,
-                )
+            audio_bytes = text_to_speech(
+                text=text_to_speak,
+                language=target_lang,
+                slow=(speed == "Slow"),
+                output_format=output_format,
+                progress_callback=update_progress,
+                progress_offset=0.3,
+            )
             
             # Clear progress
             progress_bar.empty()
             status_text.empty()
+            
+            # Verify audio was generated
+            if not audio_bytes or len(audio_bytes) == 0:
+                raise ValueError("No audio was generated")
             
             # Success!
             st.success("🎉 Your audio is ready!")
@@ -411,7 +460,7 @@ if st.button("🎧 Generate Audio", use_container_width=True):
         except Exception as e:
             progress_bar.empty()
             status_text.empty()
-            st.error(f"❌ Error generating audio: {e}")
+            st.error(f"❌ Error: {e}")
 
 # Footer
 st.markdown("---")
