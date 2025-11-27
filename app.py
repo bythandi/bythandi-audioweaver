@@ -1,12 +1,12 @@
 import os
 import re
 import tempfile
+import subprocess
 from io import BytesIO
 
 import streamlit as st
 import pdfplumber
 from gtts import gTTS
-from pydub import AudioSegment
 
 
 # ========== PAGE CONFIG ==========
@@ -154,40 +154,66 @@ def text_to_speech(
     chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
     total_chunks = len(chunks)
     
-    # Generate audio for each chunk
-    audio_segments = []
-    
-    for i, chunk in enumerate(chunks, 1):
+    # Create temp directory for processing
+    with tempfile.TemporaryDirectory() as temp_dir:
+        chunk_files = []
+        
+        # Generate audio for each chunk
+        for i, chunk in enumerate(chunks, 1):
+            if progress_callback:
+                progress_callback(i / (total_chunks + 1), f"Processing chunk {i}/{total_chunks}...")
+            
+            # Generate speech
+            tts = gTTS(text=chunk, lang=language, slow=slow)
+            
+            # Save chunk to temp file
+            chunk_path = os.path.join(temp_dir, f"chunk_{i:03d}.mp3")
+            tts.save(chunk_path)
+            chunk_files.append(chunk_path)
+        
+        # Combine chunks
         if progress_callback:
-            progress_callback(i / total_chunks, f"Processing chunk {i}/{total_chunks}...")
+            progress_callback(0.9, "Combining audio...")
         
-        # Generate speech
-        tts = gTTS(text=chunk, lang=language, slow=slow)
+        if len(chunk_files) == 1:
+            # Single chunk - just read it
+            combined_mp3 = chunk_files[0]
+        else:
+            # Multiple chunks - concatenate with ffmpeg
+            combined_mp3 = os.path.join(temp_dir, "combined.mp3")
+            list_file = os.path.join(temp_dir, "files.txt")
+            
+            # Create file list for ffmpeg
+            with open(list_file, "w") as f:
+                for chunk_path in chunk_files:
+                    f.write(f"file '{chunk_path}'\n")
+            
+            # Concatenate using ffmpeg
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", list_file, "-c", "copy", combined_mp3
+            ], capture_output=True, check=True)
         
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-            tts.save(tmp.name)
-            segment = AudioSegment.from_mp3(tmp.name)
-            audio_segments.append(segment)
-            os.unlink(tmp.name)
-    
-    # Combine all segments
-    if progress_callback:
-        progress_callback(0.95, "Combining audio...")
-    
-    combined = audio_segments[0]
-    for segment in audio_segments[1:]:
-        combined += segment
-    
-    # Export to bytes
-    output_buffer = BytesIO()
-    combined.export(output_buffer, format=output_format)
-    output_buffer.seek(0)
-    
-    if progress_callback:
-        progress_callback(1.0, "Complete!")
-    
-    return output_buffer.getvalue()
+        # Convert format if needed
+        if output_format == "wav":
+            if progress_callback:
+                progress_callback(0.95, "Converting to WAV...")
+            
+            output_path = os.path.join(temp_dir, "output.wav")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", combined_mp3, output_path
+            ], capture_output=True, check=True)
+        else:
+            output_path = combined_mp3
+        
+        # Read final audio bytes
+        with open(output_path, "rb") as f:
+            audio_bytes = f.read()
+        
+        if progress_callback:
+            progress_callback(1.0, "Complete!")
+        
+        return audio_bytes
 
 
 # ========== MAIN APP ==========
