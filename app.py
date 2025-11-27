@@ -7,6 +7,7 @@ from io import BytesIO
 import streamlit as st
 import pdfplumber
 from gtts import gTTS
+from deep_translator import GoogleTranslator
 
 
 # ========== PAGE CONFIG ==========
@@ -111,6 +112,17 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# ========== LANGUAGE CONFIG ==========
+
+LANGUAGES = {
+    "en": "🇬🇧 English",
+    "pt": "🇵🇹 Portuguese",
+    "ja": "🇯🇵 Japanese",
+    "fr": "🇫🇷 French",
+    "es": "🇪🇸 Spanish",
+}
+
+
 # ========== TEXT PROCESSING ==========
 
 def clean_text(text: str) -> str:
@@ -148,6 +160,27 @@ def extract_pdf_text(file_content: bytes) -> tuple[str, int]:
     return cleaned, page_count
 
 
+# ========== TRANSLATION ==========
+
+def translate_text(text: str, source_lang: str, target_lang: str) -> str:
+    """Translate text from source language to target language."""
+    if source_lang == target_lang:
+        return text
+    
+    # deep-translator has a 5000 char limit per request, so chunk it
+    max_chunk = 4500
+    chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
+    
+    translated_chunks = []
+    translator = GoogleTranslator(source=source_lang, target=target_lang)
+    
+    for chunk in chunks:
+        translated = translator.translate(chunk)
+        translated_chunks.append(translated)
+    
+    return " ".join(translated_chunks)
+
+
 # ========== TEXT TO SPEECH ==========
 
 def text_to_speech(
@@ -171,7 +204,7 @@ def text_to_speech(
         # Generate audio for each chunk
         for i, chunk in enumerate(chunks, 1):
             if progress_callback:
-                progress_callback(i / (total_chunks + 1), f"Processing chunk {i}/{total_chunks}...")
+                progress_callback(i / (total_chunks + 1), f"Generating audio {i}/{total_chunks}...")
             
             # Generate speech
             tts = gTTS(text=chunk, lang=language, slow=slow)
@@ -283,28 +316,40 @@ with tab_text:
 
 # Settings
 st.markdown("---")
-col1, col2, col3 = st.columns(3)
+
+# Language settings
+col1, col2 = st.columns(2)
 
 with col1:
-    language = st.selectbox(
-        "Language",
-        options=["en", "pt", "ja", "fr", "es"],
-        format_func=lambda x: {
-            "en": "🇬🇧 English",
-            "pt": "🇵🇹 Portuguese", 
-            "ja": "🇯🇵 Japanese",
-            "fr": "🇫🇷 French",
-            "es": "🇪🇸 Spanish",
-        }[x],
+    source_lang = st.selectbox(
+        "Source Language",
+        options=list(LANGUAGES.keys()),
+        format_func=lambda x: LANGUAGES[x],
+        help="The language of your original text",
     )
 
 with col2:
+    target_lang = st.selectbox(
+        "Output Language",
+        options=list(LANGUAGES.keys()),
+        format_func=lambda x: LANGUAGES[x],
+        help="The language for the audio output",
+    )
+
+# Show translation notice
+if source_lang != target_lang:
+    st.info(f"📝 Text will be translated from {LANGUAGES[source_lang]} to {LANGUAGES[target_lang]} before generating audio.")
+
+# Other settings
+col3, col4 = st.columns(2)
+
+with col3:
     speed = st.selectbox(
         "Speed",
         options=["Normal", "Slow"],
     )
 
-with col3:
+with col4:
     output_format = st.selectbox(
         "Format",
         options=["mp3", "wav"],
@@ -326,10 +371,19 @@ if st.button("🎧 Generate Audio", use_container_width=True):
             status_text.text(message)
         
         try:
+            # Translation step (if needed)
+            if source_lang != target_lang:
+                update_progress(0.1, f"Translating to {LANGUAGES[target_lang]}...")
+                text_to_speak = translate_text(text_content, source_lang, target_lang)
+                update_progress(0.3, "Translation complete!")
+            else:
+                text_to_speak = text_content
+            
+            # Generate audio
             with st.spinner("Generating audio..."):
                 audio_bytes = text_to_speech(
-                    text=text_content,
-                    language=language,
+                    text=text_to_speak,
+                    language=target_lang,
                     slow=(speed == "Slow"),
                     output_format=output_format,
                     progress_callback=update_progress,
@@ -349,7 +403,7 @@ if st.button("🎧 Generate Audio", use_container_width=True):
             st.download_button(
                 label=f"⬇️ Download {output_format.upper()}",
                 data=audio_bytes,
-                file_name=f"{file_name}.{output_format}",
+                file_name=f"{file_name}_{target_lang}.{output_format}",
                 mime=f"audio/{output_format}",
                 use_container_width=True,
             )
