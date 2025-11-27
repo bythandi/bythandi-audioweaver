@@ -228,10 +228,14 @@ def text_to_speech(
 
 # ========== MAIN APP ==========
 
+# Get the directory where app.py is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Logo
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("bythandi_logo.svg", width=150)
+    logo_path = os.path.join(SCRIPT_DIR, "bythandi_logo.svg")
+    st.image(logo_path, width=150)
 
 # Header
 st.markdown('<div class="bythandi-header">AudioWeaver</div>', unsafe_allow_html=True)
