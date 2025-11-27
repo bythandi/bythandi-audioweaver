@@ -17,5 +17,4 @@ Deployment
 Deploy free on Streamlit Cloud (streamlit.io/cloud):
 1. Push this repo to GitHub
 2. Connect to Streamlit Cloud
-3. Deploy — no secrets needed!
 Made with by ByThandi • Accessibility through audio
