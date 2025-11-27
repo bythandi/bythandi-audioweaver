@@ -27,14 +27,24 @@ st.markdown("""
         background: linear-gradient(135deg, #fff1ea 0%, #e6f0fc 100%);
     }
     
+    /* Logo container */
+    .logo-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 1rem;
+    }
+    
     /* Header styling */
     .bythandi-header {
         text-align: center;
-        color: #152d69;
         font-size: 2.5rem;
         font-weight: 600;
         margin-bottom: 0.5rem;
         letter-spacing: -0.5px;
+        background: linear-gradient(135deg, #152d69 0%, #f7931e 50%, #521305 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
     
     .bythandi-subtitle {
@@ -218,8 +228,13 @@ def text_to_speech(
 
 # ========== MAIN APP ==========
 
+# Logo
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image("bythandi_logo.svg", width=150)
+
 # Header
-st.markdown('<div class="bythandi-header">🌸 ByThandi AudioWeaver</div>', unsafe_allow_html=True)
+st.markdown('<div class="bythandi-header">AudioWeaver</div>', unsafe_allow_html=True)
 st.markdown('<div class="bythandi-subtitle">Converting text to accessible audio</div>', unsafe_allow_html=True)
 
 # Input tabs
